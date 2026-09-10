@@ -1,0 +1,116 @@
+package com.skyframework.islandcoreclient.gui.island;
+
+import com.skyframework.islandcoreclient.gui.common.BaseMenuScreen;
+import com.skyframework.islandcoreclient.network.ClientErrorToasts;
+import com.skyframework.islandcoreclient.network.PendingActionTracker;
+import com.skyframework.islandcoreclient.network.teleport.TeleportRequestC2S;
+import com.skyframework.islandcoreclient.network.teleport.TeleportStatusRequestC2S;
+import com.skyframework.islandcoreclient.state.ClientIslandCache;
+import com.skyframework.islandcoreclient.state.ClientTeleportState;
+import com.skyframework.islandcoreclient.state.ClientTeleportType;
+
+import net.neoforged.neoforge.network.PacketDistributor;
+
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.network.chat.Component;
+
+public class TeleportsScreen extends BaseMenuScreen {
+	private static final int CONTENT_X = 16;
+	private static final int ROW_HEIGHT = 20;
+	private static final int REASON_LINE_HEIGHT = 11;
+	private static final int ROW_GAP = 6;
+	private static final int BUTTON_WIDTH = 130;
+
+	public TeleportsScreen(Screen parent) {
+		super(Component.translatable("islandcoreclient.teleports.title"), parent);
+	}
+
+	// Called by ClientPacketHandlers when a fresh TeleportStatusS2C lands while this screen is
+	// open — Screen#clearAndInit() itself is protected, so this is the public door into it.
+	public void refreshFromNetwork() {
+		this.rebuildWidgets();
+	}
+
+	@Override
+	protected void initContent() {
+		PacketDistributor.sendToServer(new TeleportStatusRequestC2S());
+
+		int y = TOP_BAR_HEIGHT + 8;
+		int buttonX = this.width - 16 - BUTTON_WIDTH;
+
+		for (ClientTeleportType type : ClientTeleportType.values()) {
+			ClientTeleportState state = ClientIslandCache.getTeleportState(type);
+
+			Component label;
+			boolean active;
+			if (!state.isEnabled()) {
+				label = Component.literal("-");
+				active = false;
+			} else if (state.getCooldownRemainingSeconds() > 0) {
+				long remaining = state.getCooldownRemainingSeconds();
+				label = Component.literal(String.format("%02d:%02d", remaining / 60, remaining % 60));
+				active = false;
+			} else {
+				label = Component.translatable("islandcoreclient.teleports.teleport_button");
+				active = true;
+			}
+
+			Button button = this.addRenderableWidget(Button.builder(label, b -> onTeleportClicked(type))
+					.bounds(buttonX, y, BUTTON_WIDTH, ROW_HEIGHT)
+					.build());
+			button.active = active;
+
+			y += ROW_HEIGHT;
+			if (!state.isEnabled()) {
+				y += REASON_LINE_HEIGHT;
+			}
+			y += ROW_GAP;
+		}
+	}
+
+	@Override
+	protected void renderContent(GuiGraphics context, int mouseX, int mouseY, float delta) {
+		int y = TOP_BAR_HEIGHT + 8;
+
+		for (ClientTeleportType type : ClientTeleportType.values()) {
+			ClientTeleportState state = ClientIslandCache.getTeleportState(type);
+
+			context.drawString(this.font, type.label(),
+					CONTENT_X, y + (ROW_HEIGHT - this.font.lineHeight) / 2, 0xFFFFFF);
+			y += ROW_HEIGHT;
+
+			if (!state.isEnabled() && state.reasonKey() != null) {
+				context.drawString(this.font, Component.translatable(state.reasonKey()), CONTENT_X + 8, y, 0xAAAAAA);
+			}
+			if (!state.isEnabled()) {
+				y += REASON_LINE_HEIGHT;
+			}
+			y += ROW_GAP;
+		}
+	}
+
+	// Closes the ENTIRE menu immediately per design (the player gets full control back, as if
+	// they'd never opened it) — not just this screen. this.onClose() is deliberately NOT used here:
+	// BaseMenuScreen overrides close() to always go to its parent (that's what powers the
+	// "← Volver" button), so calling it from here would just return to the Dashboard instead of
+	// releasing the screen entirely. client.setScreen(null) is vanilla Screen#close()'s own
+	// un-overridden behavior (confirmed via javap), gotten here directly since BaseMenuScreen's
+	// override sits between this class and it.
+	//
+	// The screen must not block player movement while the teleport resolves server-side.
+	// HOME/SPAWN/FARMING's warmup progress and completion are communicated via chat messages from
+	// TeleportManagerImpl, not this screen — only an immediate rejection (wrong dimension,
+	// disabled, cooldown, etc.) surfaces here, as a toast, since by the time it arrives the menu
+	// is usually already closed.
+	private void onTeleportClicked(ClientTeleportType type) {
+		PacketDistributor.sendToServer(new TeleportRequestC2S(TeleportRequestC2S.Type.valueOf(type.name())));
+		PendingActionTracker.await((success, reasonKey) -> {
+			if (!success) {
+				ClientErrorToasts.showReason(reasonKey);
+			}
+		});
+		this.minecraft.setScreen(null);
+	}
+}
