@@ -1,18 +1,18 @@
 package com.skyframework.islandcoreclient.network.party;
 
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.core.UUIDUtil;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-// Mirrors the server's net.party.PartyStatusS2C exactly: 8 fields, hand-written PacketCodec.of
+// Mirrors the server's net.party.PartyStatusS2C exactly: 7 fields, hand-written PacketCodec.of
 // (past PacketCodec.tuple's 6-argument limit). hasParty = false is a normal, valid state (not an
 // error), same as IslandSnapshotS2C#exists — every other field is a default/empty placeholder in
 // that case, EXCEPT incomingInvite, which is the one field that can still be populated then.
@@ -21,6 +21,10 @@ import java.util.UUID;
 // the INVITEE. In practice only ever non-empty when hasParty is false — the server refuses to
 // invite a player who's already in a party, so a player who has one can never also have a pending
 // invite.
+//
+// No alliedParties field (retired along with party-to-party "/party ally add/remove" — see the
+// "alianzas" consolidation sprint: individual-player allies now live entirely on the island side,
+// see IslandSnapshotS2C's member list, managed from PartyScreen's own "Aliados" section).
 public record PartyStatusS2C(
 		boolean hasParty,
 		UUID partyId,
@@ -28,7 +32,6 @@ public record PartyStatusS2C(
 		UUID leaderUuid,
 		String leaderName,
 		List<MemberEntry> members,
-		List<AlliedPartyEntry> alliedParties,
 		Optional<IncomingPartyInviteEntry> incomingInvite
 ) implements CustomPacketPayload {
 
@@ -39,8 +42,6 @@ public record PartyStatusS2C(
 
 	private static final StreamCodec<RegistryFriendlyByteBuf, List<MemberEntry>> MEMBER_LIST_CODEC =
 			ByteBufCodecs.collection(ArrayList::new, MemberEntry.CODEC);
-	private static final StreamCodec<RegistryFriendlyByteBuf, List<AlliedPartyEntry>> ALLIED_PARTY_LIST_CODEC =
-			ByteBufCodecs.collection(ArrayList::new, AlliedPartyEntry.CODEC);
 	private static final StreamCodec<RegistryFriendlyByteBuf, Optional<IncomingPartyInviteEntry>> INCOMING_INVITE_CODEC =
 			ByteBufCodecs.optional(IncomingPartyInviteEntry.CODEC);
 
@@ -52,7 +53,6 @@ public record PartyStatusS2C(
 				UUIDUtil.STREAM_CODEC.encode(buf, value.leaderUuid());
 				ByteBufCodecs.STRING_UTF8.encode(buf, value.leaderName());
 				MEMBER_LIST_CODEC.encode(buf, value.members());
-				ALLIED_PARTY_LIST_CODEC.encode(buf, value.alliedParties());
 				INCOMING_INVITE_CODEC.encode(buf, value.incomingInvite());
 			},
 			buf -> new PartyStatusS2C(
@@ -62,7 +62,6 @@ public record PartyStatusS2C(
 					UUIDUtil.STREAM_CODEC.decode(buf),
 					ByteBufCodecs.STRING_UTF8.decode(buf),
 					MEMBER_LIST_CODEC.decode(buf),
-					ALLIED_PARTY_LIST_CODEC.decode(buf),
 					INCOMING_INVITE_CODEC.decode(buf)
 			)
 	);
@@ -77,14 +76,6 @@ public record PartyStatusS2C(
 				UUIDUtil.STREAM_CODEC, MemberEntry::uuid,
 				ByteBufCodecs.STRING_UTF8, MemberEntry::name,
 				MemberEntry::new
-		);
-	}
-
-	public record AlliedPartyEntry(UUID partyId, String name) {
-		public static final StreamCodec<RegistryFriendlyByteBuf, AlliedPartyEntry> CODEC = StreamCodec.composite(
-				UUIDUtil.STREAM_CODEC, AlliedPartyEntry::partyId,
-				ByteBufCodecs.STRING_UTF8, AlliedPartyEntry::name,
-				AlliedPartyEntry::new
 		);
 	}
 

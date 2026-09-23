@@ -6,12 +6,18 @@ import com.skyframework.islandcoreclient.gui.admin.AdminIslandMembersScreen;
 import com.skyframework.islandcoreclient.gui.admin.DefaultConfigScreen;
 import com.skyframework.islandcoreclient.gui.admin.DimensionManagerScreen;
 import com.skyframework.islandcoreclient.gui.admin.SpawnAuthorizedPlayersScreen;
+import com.skyframework.islandcoreclient.gui.admin.SpawnFlagsScreen;
 import com.skyframework.islandcoreclient.gui.admin.SpawnManagerScreen;
 import com.skyframework.islandcoreclient.gui.admin.VanillaResetScreen;
 import com.skyframework.islandcoreclient.gui.island.BiomeScreen;
 import com.skyframework.islandcoreclient.gui.island.SettingsScreen;
 import com.skyframework.islandcoreclient.gui.island.TeleportsScreen;
+import com.skyframework.islandcoreclient.gui.party.PartyMembersScreen;
 import com.skyframework.islandcoreclient.gui.party.PartyScreen;
+import com.skyframework.islandcoreclient.network.alliance.AllyLocationsS2C;
+import com.skyframework.islandcoreclient.network.alliance.LocationSharingSetC2S;
+import com.skyframework.islandcoreclient.network.alliance.LocationSharingStatusRequestC2S;
+import com.skyframework.islandcoreclient.network.alliance.LocationSharingStatusS2C;
 import com.skyframework.islandcoreclient.network.admin.dimension.DimensionCreateC2S;
 import com.skyframework.islandcoreclient.network.admin.dimension.DimensionDeleteC2S;
 import com.skyframework.islandcoreclient.network.admin.dimension.DimensionDeleteConfirmC2S;
@@ -32,6 +38,13 @@ import com.skyframework.islandcoreclient.network.admin.spawn.SpawnAuthorizedPlay
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnBuildProtectionSetC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnBuildProtectionStatusRequestC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnBuildProtectionStatusS2C;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnExceptionGroupSetPresetC2S;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnExceptionGroupsStatusRequestC2S;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnExceptionGroupsStatusS2C;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnFlagSetC2S;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnFlagSetPresetC2S;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnFlagsStatusRequestC2S;
+import com.skyframework.islandcoreclient.network.admin.spawn.SpawnFlagsStatusS2C;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnIslandCreateC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnIslandResizeC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnIslandSetHomeC2S;
@@ -40,6 +53,7 @@ import com.skyframework.islandcoreclient.network.admin.defaults.AdminDefaultsSta
 import com.skyframework.islandcoreclient.network.admin.defaults.AdminExceptionSetServerDefaultC2S;
 import com.skyframework.islandcoreclient.network.admin.defaults.AdminFlagSetRequirementC2S;
 import com.skyframework.islandcoreclient.network.admin.defaults.AdminFlagSetServerDefaultC2S;
+import com.skyframework.islandcoreclient.network.admin.defaults.AdminGlobalFlagSetServerDefaultC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnStatusRequestC2S;
 import com.skyframework.islandcoreclient.network.admin.spawn.SpawnStatusS2C;
 import com.skyframework.islandcoreclient.network.admin.vanilla.VanillaResetCancelC2S;
@@ -70,11 +84,10 @@ import com.skyframework.islandcoreclient.network.member.MemberAllyAddC2S;
 import com.skyframework.islandcoreclient.network.member.MemberAllyRemoveC2S;
 import com.skyframework.islandcoreclient.network.member.MemberInviteAcceptC2S;
 import com.skyframework.islandcoreclient.network.member.MemberInviteC2S;
+import com.skyframework.islandcoreclient.network.member.MemberInviteDeclineC2S;
 import com.skyframework.islandcoreclient.network.member.MemberRemoveC2S;
 import com.skyframework.islandcoreclient.network.member.MemberTrustC2S;
 import com.skyframework.islandcoreclient.network.party.PartyAcceptC2S;
-import com.skyframework.islandcoreclient.network.party.PartyAllyAddC2S;
-import com.skyframework.islandcoreclient.network.party.PartyAllyRemoveC2S;
 import com.skyframework.islandcoreclient.network.party.PartyCreateC2S;
 import com.skyframework.islandcoreclient.network.party.PartyDisbandConfirmC2S;
 import com.skyframework.islandcoreclient.network.party.PartyDisbandRequestC2S;
@@ -88,9 +101,13 @@ import com.skyframework.islandcoreclient.network.teleport.TeleportRequestC2S;
 import com.skyframework.islandcoreclient.network.teleport.TeleportStatusRequestC2S;
 import com.skyframework.islandcoreclient.network.teleport.TeleportStatusS2C;
 import com.skyframework.islandcoreclient.state.ClientAdminDefaultsCache;
+import com.skyframework.islandcoreclient.state.ClientAllyLocationView;
+import com.skyframework.islandcoreclient.state.ClientAllyLocationsCache;
 import com.skyframework.islandcoreclient.state.ClientConnectionState;
 import com.skyframework.islandcoreclient.state.ClientIslandCache;
+import com.skyframework.islandcoreclient.state.ClientLocationSharingCache;
 import com.skyframework.islandcoreclient.state.ClientPartyCache;
+import com.skyframework.islandcoreclient.state.ClientSpawnFlagsCache;
 
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -106,6 +123,9 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 
+import java.util.ArrayList;
+import java.util.List;
+
 // NeoForge's networking model merges "register the wire type" and "register the receiver" into a
 // single registrar.playToServer/playToClient call (Fabric's PayloadTypeRegistry.register +
 // ServerPlayNetworking.registerGlobalReceiver split), and requires BOTH C2S and S2C types to be
@@ -120,7 +140,16 @@ public final class ClientPacketHandlers {
 	// (RegisterPayloadHandlersEvent is an IModBusEvent) — called from IslandCoreClientMod's
 	// constructor via modEventBus.addListener(ClientPacketHandlers::registerPayloadTypes).
 	public static void registerPayloadTypes(RegisterPayloadHandlersEvent event) {
-		PayloadRegistrar registrar = event.registrar("1");
+		// .optional(): this project deliberately splits into two independently-installed mods
+		// sharing the same "islandcore" channel namespace — the client-side "islandcoreclient" mod
+		// and the server-side "islandcore" companion mod (different modids). Without this,
+		// NeoForge's own per-modid channel presence check refuses the connection outright when this
+		// client (which has no mod literally called "islandcore") connects to the server, even
+		// though islandcoreclient IS that channel's real client-side counterpart. Real
+		// protocol-compatibility checking is already handled by our own handshake
+		// (ClientHandshakeC2S/ServerHandshakeS2C), so relaxing NeoForge's own presence check here
+		// doesn't weaken anything. Must match the server's own ServerPacketHandlers#register.
+		PayloadRegistrar registrar = event.registrar("1").optional();
 
 		sendOnly(registrar, ClientHandshakeC2S.TYPE, ClientHandshakeC2S.CODEC);
 		receive(registrar, ServerHandshakeS2C.TYPE, ServerHandshakeS2C.CODEC, payload -> {
@@ -150,6 +179,7 @@ public final class ClientPacketHandlers {
 
 		sendOnly(registrar, MemberInviteC2S.TYPE, MemberInviteC2S.CODEC);
 		sendOnly(registrar, MemberInviteAcceptC2S.TYPE, MemberInviteAcceptC2S.CODEC);
+		sendOnly(registrar, MemberInviteDeclineC2S.TYPE, MemberInviteDeclineC2S.CODEC);
 		sendOnly(registrar, MemberTrustC2S.TYPE, MemberTrustC2S.CODEC);
 		sendOnly(registrar, MemberRemoveC2S.TYPE, MemberRemoveC2S.CODEC);
 		sendOnly(registrar, MemberAllyAddC2S.TYPE, MemberAllyAddC2S.CODEC);
@@ -205,6 +235,7 @@ public final class ClientPacketHandlers {
 			}
 		});
 		sendOnly(registrar, AdminFlagSetServerDefaultC2S.TYPE, AdminFlagSetServerDefaultC2S.CODEC);
+		sendOnly(registrar, AdminGlobalFlagSetServerDefaultC2S.TYPE, AdminGlobalFlagSetServerDefaultC2S.CODEC);
 		sendOnly(registrar, AdminExceptionSetServerDefaultC2S.TYPE, AdminExceptionSetServerDefaultC2S.CODEC);
 		sendOnly(registrar, AdminFlagSetRequirementC2S.TYPE, AdminFlagSetRequirementC2S.CODEC);
 
@@ -212,6 +243,8 @@ public final class ClientPacketHandlers {
 		receive(registrar, PartyStatusS2C.TYPE, PartyStatusS2C.CODEC, payload -> {
 			ClientPartyCache.applyStatus(payload);
 			if (Minecraft.getInstance().screen instanceof PartyScreen screen) {
+				screen.refreshFromNetwork();
+			} else if (Minecraft.getInstance().screen instanceof PartyMembersScreen screen) {
 				screen.refreshFromNetwork();
 			}
 		});
@@ -223,10 +256,9 @@ public final class ClientPacketHandlers {
 		sendOnly(registrar, PartyRenameC2S.TYPE, PartyRenameC2S.CODEC);
 		sendOnly(registrar, PartyDisbandRequestC2S.TYPE, PartyDisbandRequestC2S.CODEC);
 		sendOnly(registrar, PartyDisbandConfirmC2S.TYPE, PartyDisbandConfirmC2S.CODEC);
-		sendOnly(registrar, PartyAllyAddC2S.TYPE, PartyAllyAddC2S.CODEC);
-		sendOnly(registrar, PartyAllyRemoveC2S.TYPE, PartyAllyRemoveC2S.CODEC);
 
 		registerAdminHandlers(registrar);
+		registerLocationSharingHandlers(registrar);
 	}
 
 	// Admin network block: each S2C handler applies the real data to ClientIslandCache, then
@@ -280,6 +312,24 @@ public final class ClientPacketHandlers {
 		sendOnly(registrar, SpawnAuthorizedPlayerAddC2S.TYPE, SpawnAuthorizedPlayerAddC2S.CODEC);
 		sendOnly(registrar, SpawnAuthorizedPlayerRemoveC2S.TYPE, SpawnAuthorizedPlayerRemoveC2S.CODEC);
 
+		sendOnly(registrar, SpawnFlagsStatusRequestC2S.TYPE, SpawnFlagsStatusRequestC2S.CODEC);
+		receive(registrar, SpawnFlagsStatusS2C.TYPE, SpawnFlagsStatusS2C.CODEC, payload -> {
+			ClientSpawnFlagsCache.applyFlagsStatus(payload);
+			if (Minecraft.getInstance().screen instanceof SpawnFlagsScreen screen) {
+				screen.refreshFromNetwork();
+			}
+		});
+		sendOnly(registrar, SpawnExceptionGroupsStatusRequestC2S.TYPE, SpawnExceptionGroupsStatusRequestC2S.CODEC);
+		receive(registrar, SpawnExceptionGroupsStatusS2C.TYPE, SpawnExceptionGroupsStatusS2C.CODEC, payload -> {
+			ClientSpawnFlagsCache.applyExceptionGroupsStatus(payload);
+			if (Minecraft.getInstance().screen instanceof SpawnFlagsScreen screen) {
+				screen.refreshFromNetwork();
+			}
+		});
+		sendOnly(registrar, SpawnFlagSetC2S.TYPE, SpawnFlagSetC2S.CODEC);
+		sendOnly(registrar, SpawnFlagSetPresetC2S.TYPE, SpawnFlagSetPresetC2S.CODEC);
+		sendOnly(registrar, SpawnExceptionGroupSetPresetC2S.TYPE, SpawnExceptionGroupSetPresetC2S.CODEC);
+
 		sendOnly(registrar, DimensionListRequestC2S.TYPE, DimensionListRequestC2S.CODEC);
 		receive(registrar, DimensionListS2C.TYPE, DimensionListS2C.CODEC, payload -> {
 			ClientIslandCache.applyDimensionList(payload);
@@ -310,6 +360,29 @@ public final class ClientPacketHandlers {
 		sendOnly(registrar, VanillaResetQueueC2S.TYPE, VanillaResetQueueC2S.CODEC);
 		sendOnly(registrar, VanillaResetConfirmC2S.TYPE, VanillaResetConfirmC2S.CODEC);
 		sendOnly(registrar, VanillaResetCancelC2S.TYPE, VanillaResetCancelC2S.CODEC);
+	}
+
+	// AllyLocationsS2C is a periodic push with no requesting screen to rebuild — it only ever feeds
+	// AllyHudRenderer, which reads ClientAllyLocationsCache fresh every frame on its own. Renamed
+	// from registerAllianceHandlers: the island-to-island alliance status handler that used to live
+	// here is gone (AllianceScreen/ClientAllianceCache retired) — location sharing now refreshes
+	// PartyScreen, which hosts the toggles, instead of the old AllianceScreen.
+	private static void registerLocationSharingHandlers(PayloadRegistrar registrar) {
+		sendOnly(registrar, LocationSharingStatusRequestC2S.TYPE, LocationSharingStatusRequestC2S.CODEC);
+		receive(registrar, LocationSharingStatusS2C.TYPE, LocationSharingStatusS2C.CODEC, payload -> {
+			ClientLocationSharingCache.applyStatus(payload);
+			if (Minecraft.getInstance().screen instanceof PartyScreen screen) {
+				screen.refreshFromNetwork();
+			}
+		});
+		sendOnly(registrar, LocationSharingSetC2S.TYPE, LocationSharingSetC2S.CODEC);
+		receive(registrar, AllyLocationsS2C.TYPE, AllyLocationsS2C.CODEC, payload -> {
+			List<ClientAllyLocationView> views = new ArrayList<>();
+			for (AllyLocationsS2C.Entry entry : payload.entries()) {
+				views.add(new ClientAllyLocationView(entry.uuid(), entry.name(), entry.x(), entry.y(), entry.z()));
+			}
+			ClientAllyLocationsCache.applyLocations(views);
+		});
 	}
 
 	// Registers a payload this client only ever SENDS (server-bound): a no-op handler, since this

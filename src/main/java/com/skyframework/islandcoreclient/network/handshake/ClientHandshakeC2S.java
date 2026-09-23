@@ -7,9 +7,10 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
 public record ClientHandshakeC2S(int protocolVersion) implements CustomPacketPayload {
-	// Bumped to 3 alongside FlagRegistry's "build"/"break" merge into "construccion" (one fewer
-	// flag, different id) — must match the server's NetworkChannels.PROTOCOL_VERSION.
-	public static final int CURRENT_PROTOCOL_VERSION = 3;
+	// Bumped to 6 alongside the "teletransportes dinámicos" sprint (TeleportStatusS2C's farming
+	// field became a dimensions list, TeleportRequestC2S's FARMING type was replaced by DIMENSION
+	// with a new dimensionId field) — must match the server's NetworkChannels.PROTOCOL_VERSION.
+	public static final int CURRENT_PROTOCOL_VERSION = 6;
 
 	// Namespaced under "islandcore", not "islandcoreclient": the server mod owns this protocol.
 	public static final CustomPacketPayload.Type<ClientHandshakeC2S> TYPE =

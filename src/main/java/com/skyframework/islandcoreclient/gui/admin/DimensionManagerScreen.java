@@ -14,20 +14,21 @@ import com.skyframework.islandcoreclient.network.admin.dimension.DimensionRegene
 import com.skyframework.islandcoreclient.state.ClientDimensionStyle;
 import com.skyframework.islandcoreclient.state.ClientDimensionView;
 import com.skyframework.islandcoreclient.state.ClientIslandCache;
+import com.skyframework.islandcoreclient.gui.common.PagedFlagGrid;
 
-import net.neoforged.neoforge.network.PacketDistributor;
-
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.ChatFormatting;
-
-import java.util.Optional;
 
 import org.jetbrains.annotations.Nullable;
+import net.neoforged.neoforge.network.PacketDistributor;
+
+import java.util.List;
+import java.util.Optional;
 
 /**
  * List / detail / create-form all live in this one screen, switched by {@link #mode}. The initial
@@ -56,6 +57,18 @@ public class DimensionManagerScreen extends BaseMenuScreen {
 	private static final int SUB_BACK_Y = TOP_BAR_HEIGHT + 6;
 	private static final int TOP_BAR_ACTION_WIDTH = 90;
 	private static final int TOP_BAR_ACTION_HEIGHT = 20;
+
+	// Paginated list (Mode.LIST only) — same PagedFlagGrid + prev/next + page-indicator pattern
+	// TeleportsScreen already uses for its own dynamic-dimensions section, so creating many
+	// dimensions no longer pushes buttons below the screen's edge.
+	private static final int GRID_MAX_WIDTH = 480;
+	private static final int GRID_COLUMN_GAP = 24;
+	private static final int PAGINATION_ROW_HEIGHT = 20;
+	private static final int PAGINATION_GAP = 8;
+	private static final int PAGINATION_BUTTON_WIDTH = 90;
+	private static final int CONTENT_BOTTOM_MARGIN = 12;
+
+	private final PagedFlagGrid listGrid = new PagedFlagGrid(0, LIST_START_Y, 1, 1, ROW_HEIGHT, ROW_GAP, GRID_COLUMN_GAP);
 
 	private Mode mode = Mode.LIST;
 	@Nullable
@@ -94,21 +107,9 @@ public class DimensionManagerScreen extends BaseMenuScreen {
 	}
 
 	private void initListContent() {
-		int y = LIST_START_Y;
-		for (ClientDimensionView dimension : ClientIslandCache.getDimensions()) {
-			this.addRenderableWidget(Button.builder(
-							Component.literal(dimension.displayName() + " (" + dimension.id() + ")"),
-							button -> {
-								this.selectedDimensionId = dimension.id();
-								this.mode = Mode.DETAIL;
-								PacketDistributor.sendToServer(new DimensionDetailRequestC2S(dimension.path()));
-								this.rebuildWidgets();
-							})
-					.bounds(CONTENT_X, y, 360, ROW_HEIGHT)
-					.build());
-			y += ROW_HEIGHT + ROW_GAP;
-		}
-
+		// Top bar's free right-hand slot — same slot/height initCreateContent's own confirm button
+		// uses, freeing the whole content area for the paginated grid below instead of competing
+		// with it for vertical room.
 		this.addRenderableWidget(Button.builder(
 						Component.translatable("islandcoreclient.admin.dimension_manager.create_button"),
 						button -> {
@@ -116,8 +117,63 @@ public class DimensionManagerScreen extends BaseMenuScreen {
 							this.mode = Mode.CREATE;
 							this.rebuildWidgets();
 						})
-				.bounds(CONTENT_X, y + 8, 220, ROW_HEIGHT)
+				.bounds(this.width - 8 - TOP_BAR_ACTION_WIDTH, (TOP_BAR_HEIGHT - TOP_BAR_ACTION_HEIGHT) / 2,
+						TOP_BAR_ACTION_WIDTH, TOP_BAR_ACTION_HEIGHT)
 				.build());
+
+		List<ClientDimensionView> dimensions = ClientIslandCache.getDimensions();
+
+		int gridWidth = Math.min(GRID_MAX_WIDTH, this.width - 32);
+		int gridX = this.width / 2 - gridWidth / 2;
+		int gridViewportHeight = Math.max(ROW_HEIGHT,
+				this.height - CONTENT_BOTTOM_MARGIN - PAGINATION_ROW_HEIGHT - PAGINATION_GAP - LIST_START_Y);
+		listGrid.setViewport(gridX, LIST_START_Y, gridWidth, gridViewportHeight);
+		listGrid.setItemCount(dimensions.size());
+
+		for (int i = 0; i < dimensions.size(); i++) {
+			if (!listGrid.isItemOnCurrentPage(i)) {
+				continue;
+			}
+			ClientDimensionView dimension = dimensions.get(i);
+			// Name colored per style (VOID_FLAT black / NETHER_LIKE red / OVERWORLD_LIKE green /
+			// END_LIKE purple — same 4-color convention ClientResetDimension already uses for
+			// vanilla Overworld/Nether/End), the "(id)" suffix left plain.
+			Component rowLabel = Component.literal(dimension.displayName()).withStyle(dimension.style().color())
+					.append(Component.literal(" (" + dimension.id() + ")"));
+			this.addRenderableWidget(Button.builder(
+							rowLabel,
+							button -> {
+								this.selectedDimensionId = dimension.id();
+								this.mode = Mode.DETAIL;
+								PacketDistributor.sendToServer(new DimensionDetailRequestC2S(dimension.path()));
+								this.rebuildWidgets();
+							})
+					.bounds(listGrid.getItemX(i), listGrid.getItemY(i), listGrid.getItemWidth(), ROW_HEIGHT)
+					.build());
+		}
+
+		int paginationY = listPaginationRowY();
+		Button prevButton = this.addRenderableWidget(Button.builder(Component.translatable("islandcoreclient.pagination.prev"),
+						b -> {
+							listGrid.prevPage();
+							this.rebuildWidgets();
+						})
+				.bounds(gridX, paginationY, PAGINATION_BUTTON_WIDTH, PAGINATION_ROW_HEIGHT)
+				.build());
+		prevButton.active = listGrid.hasPrevPage();
+
+		Button nextButton = this.addRenderableWidget(Button.builder(Component.translatable("islandcoreclient.pagination.next"),
+						b -> {
+							listGrid.nextPage();
+							this.rebuildWidgets();
+						})
+				.bounds(gridX + gridWidth - PAGINATION_BUTTON_WIDTH, paginationY, PAGINATION_BUTTON_WIDTH, PAGINATION_ROW_HEIGHT)
+				.build());
+		nextButton.active = listGrid.hasNextPage();
+	}
+
+	private int listPaginationRowY() {
+		return this.height - CONTENT_BOTTOM_MARGIN - PAGINATION_ROW_HEIGHT;
 	}
 
 	private void addBackToListButton() {
@@ -146,6 +202,14 @@ public class DimensionManagerScreen extends BaseMenuScreen {
 		// before this Y, which the previous flat offset didn't account for, letting these buttons'
 		// top edge overlap that text.
 		int buttonY = SUB_BACK_Y + 20 + LINE_HEIGHT * 4 + 16 + LINE_HEIGHT * 2;
+		if (pending) {
+			// One more line of clearance below the "Regeneración/Eliminación solicitada — expira en
+			// Xs" countdown renderDetailContent draws right above this Y in the pending case — it was
+			// landing right on top of the confirm button (the only one visible while pending) without
+			// this. Conditional so the normal (non-pending) regenerate/delete row keeps its original,
+			// already pixel-budgeted position instead.
+			buttonY += LINE_HEIGHT;
+		}
 
 		Button regenerateButton = this.addRenderableWidget(Button.builder(
 						Component.translatable("islandcoreclient.admin.dimension_manager.regenerate_button"),
@@ -241,7 +305,13 @@ public class DimensionManagerScreen extends BaseMenuScreen {
 		if (ClientIslandCache.getDimensions().isEmpty()) {
 			context.drawString(this.font,
 					Component.translatable("islandcoreclient.admin.dimension_manager.empty"), CONTENT_X, LIST_START_Y, 0xAAAAAA);
+			return;
 		}
+
+		Component indicator = Component.translatable("islandcoreclient.pagination.page_indicator", listGrid.getCurrentPage() + 1, listGrid.totalPages());
+		int textWidth = this.font.width(indicator);
+		context.drawString(this.font, indicator, this.width / 2 - textWidth / 2,
+				listPaginationRowY() + (PAGINATION_ROW_HEIGHT - this.font.lineHeight) / 2, 0xAAAAAA);
 	}
 
 	private void renderDetailContent(GuiGraphics context) {

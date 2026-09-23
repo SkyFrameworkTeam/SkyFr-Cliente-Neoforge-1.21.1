@@ -43,10 +43,10 @@ public final class OpenMenuKeybind {
 
 		NeoForge.EVENT_BUS.addListener((RegisterClientCommandsEvent event) ->
 				event.getDispatcher().register(Commands.literal("islandmenu").executes(context -> {
-					// Deferred to the next tick — see OpenPartyKeybind's "/islandparty" command for
-					// why: this callback runs inside ChatScreen's own Enter-key handler, which closes
-					// the chat screen (client.setScreen(null)) right after dispatching, which would
-					// otherwise wipe out a setScreen call made synchronously here.
+					// Deferred to the next tick: this callback runs inside ChatScreen's own Enter-key
+					// handler, which closes the chat screen (client.setScreen(null)) right after
+					// dispatching, which would otherwise wipe out a setScreen call made synchronously
+					// here.
 					Minecraft client = Minecraft.getInstance();
 					client.execute(() -> openMenu(client));
 					return 1;

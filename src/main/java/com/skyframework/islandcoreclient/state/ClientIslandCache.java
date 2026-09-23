@@ -13,6 +13,11 @@ import com.skyframework.islandcoreclient.network.flag.FlagsStatusS2C;
 import com.skyframework.islandcoreclient.network.island.IslandSnapshotS2C;
 import com.skyframework.islandcoreclient.network.teleport.TeleportStatusS2C;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+
+import org.jetbrains.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -20,11 +25,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-
-import net.minecraft.network.chat.Component;
-import net.minecraft.core.BlockPos;
-
-import org.jetbrains.annotations.Nullable;
 
 public final class ClientIslandCache {
 	// The snapshot protocol only ever describes the requesting player's OWN island (the server
@@ -76,6 +76,9 @@ public final class ClientIslandCache {
 			TELEPORT_STATES.put(type, new ClientTeleportState(false, 0L, null));
 		}
 	}
+
+	// Real, populated from TeleportStatusS2C#dimensions — see applyTeleportStatus below.
+	private static volatile List<ClientDimensionTeleportView> dimensionTeleports = List.of();
 
 	// Admin network block: all real, populated from AdminIslandListS2C/AdminIslandDetailS2C/
 	// SpawnStatusS2C/DimensionListS2C/DimensionDetailS2C/VanillaResetListS2C. Empty/default until
@@ -230,15 +233,25 @@ public final class ClientIslandCache {
 		applyTeleportStatusEntry(ClientTeleportType.HOME, status.home());
 		applyTeleportStatusEntry(ClientTeleportType.SPAWN, status.spawn());
 		applyTeleportStatusEntry(ClientTeleportType.RTP, status.rtp());
-		applyTeleportStatusEntry(ClientTeleportType.FARMING, status.farming());
+
+		List<ClientDimensionTeleportView> mapped = new ArrayList<>();
+		for (TeleportStatusS2C.DimensionTeleportEntry entry : status.dimensions()) {
+			mapped.add(new ClientDimensionTeleportView(entry.id(), entry.displayName(),
+					new ClientTeleportState(entry.enabled(), entry.cooldownRemainingSeconds(), null)));
+		}
+		dimensionTeleports = mapped;
 	}
 
 	private static void applyTeleportStatusEntry(ClientTeleportType type, TeleportStatusS2C.StatusEntry entry) {
 		// reasonKey from the server is a raw ActionReason id (e.g. "rtp_disabled"); pre-resolving
 		// it to a full translation key here means TeleportsScreen's existing
-		// Component.translatable(state.reasonKey()) call needs no change.
+		// Text.translatable(state.reasonKey()) call needs no change.
 		String translationKey = entry.reasonKey().map(reason -> "islandcoreclient.reason." + reason).orElse(null);
 		TELEPORT_STATES.put(type, new ClientTeleportState(entry.enabled(), entry.cooldownRemainingSeconds(), translationKey));
+	}
+
+	public static List<ClientDimensionTeleportView> getDimensionTeleports() {
+		return dimensionTeleports;
 	}
 
 	public static void applyBiomeTiers(BiomeTiersS2C tiers) {
@@ -260,7 +273,7 @@ public final class ClientIslandCache {
 
 	// Prefer an existing Spanish translation for biomes IslandCoreClient already knows about
 	// (the ones in the default biome_tiers.json config); fall back to the server's generic
-	// English label (derived from the biome's ResourceLocation path) for anything else, so a custom
+	// English label (derived from the biome's Identifier path) for anything else, so a custom
 	// server config doesn't render a raw/untranslated key.
 	private static Component localizedBiomeLabel(BiomeTiersS2C.BiomeEntry biome) {
 		return getKnownBiomeLabel(biome.biomeId()).orElseGet(() -> Component.literal(biome.label()));

@@ -9,18 +9,22 @@ import com.skyframework.islandcoreclient.state.ClientBiomeTierView;
 import com.skyframework.islandcoreclient.state.ClientBiomeView;
 import com.skyframework.islandcoreclient.state.ClientIslandCache;
 
-import java.util.List;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Button.OnPress;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 
 import net.neoforged.neoforge.network.PacketDistributor;
 
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.ConfirmScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.network.chat.Component;
-import net.minecraft.ChatFormatting;
+import java.util.List;
 
+// TODO (future sprint, not yet implemented): add a non-clickable (ⓘ) info icon next to each locked
+// tier that explains how to unlock it on hover (e.g. "pídeselo a un administrador"), separate from
+// the existing per-button Tooltip that just names the missing permission.
 public class BiomeScreen extends BaseMenuScreen {
 	// Neither IslandSnapshotS2C nor BiomeTiersS2C exposes the island's current biome-change
 	// cooldown remaining, or which biome is currently applied — see ClientIslandCache's notes.
@@ -42,6 +46,14 @@ public class BiomeScreen extends BaseMenuScreen {
 
 	public BiomeScreen(Screen parent) {
 		super(Component.translatable("islandcoreclient.biome.title"), parent);
+		// Sent once here, NOT from initContent(): initContent() reruns on every clearAndInit(),
+		// including the one refreshFromNetwork() below does when the reply to THIS exact request
+		// lands — sending it from initContent() turned that into a self-perpetuating
+		// request/rebuild loop (a fresh BiomeTiersS2C arriving, rebuilding all buttons — including
+		// each locked tier's Tooltip, resetting its hover timer — which sent another request, ad
+		// infinitum), which is what made the locked-tier tooltip flicker nonstop instead of holding
+		// steady. Same one-shot-in-constructor pattern AllianceScreen already uses.
+		PacketDistributor.sendToServer(new BiomeTiersRequestC2S());
 	}
 
 	// Called by ClientPacketHandlers when a fresh BiomeTiersS2C lands while this screen is open —
@@ -55,8 +67,6 @@ public class BiomeScreen extends BaseMenuScreen {
 
 	@Override
 	protected void initContent() {
-		PacketDistributor.sendToServer(new BiomeTiersRequestC2S());
-
 		boolean cooldownActive = ClientIslandCache.getBiomeCooldownRemainingSeconds() > 0;
 		String currentBiomeId = ClientIslandCache.getCurrentBiomeId();
 
@@ -81,12 +91,25 @@ public class BiomeScreen extends BaseMenuScreen {
 				int x = CONTENT_X + col * (buttonWidth + BIOME_BUTTON_GAP);
 				int buttonY = y + row * (BIOME_BUTTON_HEIGHT + BIOME_BUTTON_GAP);
 
-				Button.Builder builder = Button.builder(label, button -> onBiomeClicked(biome))
-						.bounds(x, buttonY, buttonWidth, BIOME_BUTTON_HEIGHT);
-				if (tier.permissionLabel() != null) {
-					builder = builder.tooltip(Tooltip.create(tier.permissionLabel()));
+				Button button;
+				if (isCurrent) {
+					// Bold + underlined, on top of the permanently-"pressed" look below — the check
+					// prefix alone read as too subtle to spot at a glance among a full grid of buttons.
+					Component selectedLabel = label.copy().withStyle(ChatFormatting.BOLD, ChatFormatting.UNDERLINE);
+					button = new SelectedBiomeButton(x, buttonY, buttonWidth, BIOME_BUTTON_HEIGHT, selectedLabel,
+							b -> onBiomeClicked(biome));
+					if (tier.permissionLabel() != null) {
+						button.setTooltip(Tooltip.create(tier.permissionLabel()));
+					}
+					this.addRenderableWidget(button);
+				} else {
+					Button.Builder builder = Button.builder(label, b -> onBiomeClicked(biome))
+							.bounds(x, buttonY, buttonWidth, BIOME_BUTTON_HEIGHT);
+					if (tier.permissionLabel() != null) {
+						builder = builder.tooltip(Tooltip.create(tier.permissionLabel()));
+					}
+					button = this.addRenderableWidget(builder.build());
 				}
-				Button button = this.addRenderableWidget(builder.build());
 				button.active = tier.unlocked() && !cooldownActive;
 			}
 
@@ -168,6 +191,24 @@ public class BiomeScreen extends BaseMenuScreen {
 			}
 			this.rebuildWidgets();
 		});
+	}
+
+	// Renders permanently in vanilla's own "highlighted/pressed" button texture — the same
+	// widget_highlighted look Button already uses while hovered/focused (AbstractButton#renderWidget
+	// keys the sprite off isHoveredOrFocused(), confirmed by decompiling the neoforge-21.1.250
+	// sources — the pre-1.20 GUI-sprite-rework isSelected() override the Yarn source this was
+	// ported from used no longer exists on this mapping) — repurposed here as a standing "this one
+	// is active" marker for the current biome, instead of inventing a new visual not already used
+	// elsewhere.
+	private static final class SelectedBiomeButton extends Button {
+		private SelectedBiomeButton(int x, int y, int width, int height, Component message, OnPress onPress) {
+			super(x, y, width, height, message, onPress, DEFAULT_NARRATION);
+		}
+
+		@Override
+		public boolean isHoveredOrFocused() {
+			return true;
+		}
 	}
 
 	private static String formatCooldown(long totalSeconds) {

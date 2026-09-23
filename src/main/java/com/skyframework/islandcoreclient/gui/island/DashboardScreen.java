@@ -7,6 +7,7 @@ import com.skyframework.islandcoreclient.gui.admin.SpawnManagerScreen;
 import com.skyframework.islandcoreclient.gui.admin.VanillaResetScreen;
 import com.skyframework.islandcoreclient.gui.common.BaseMenuScreen;
 import com.skyframework.islandcoreclient.gui.common.TimeFormat;
+import com.skyframework.islandcoreclient.gui.party.PartyScreen;
 import com.skyframework.islandcoreclient.network.ClientErrorToasts;
 import com.skyframework.islandcoreclient.network.PendingActionTracker;
 import com.skyframework.islandcoreclient.network.island.IslandCreateC2S;
@@ -60,7 +61,7 @@ public class DashboardScreen extends BaseMenuScreen {
 
 	// Player-view widgets (only non-null while !showingAdmin).
 	private Button settingsButton;
-	private Button membersButton;
+	private Button partyButton;
 	private Button biomeButton;
 	private Button limitsButton;
 	private Button teleportsButton;
@@ -117,9 +118,13 @@ public class DashboardScreen extends BaseMenuScreen {
 						button -> this.minecraft.setScreen(new SettingsScreen(this)))
 				.bounds(startX, row1Y, ACTION_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT)
 				.build());
-		this.membersButton = this.addRenderableWidget(Button.builder(
-						Component.translatable("islandcoreclient.dashboard.members_button"),
-						button -> this.minecraft.setScreen(new MembersScreen(this)))
+		// Unlike every other action button here, Party must stay clickable with no island: the
+		// island-members half of the merged screen just renders dimmed/empty in that case (see
+		// PartyScreen's own MEMBERS page), but the party half never depended on having an island —
+		// so this one is deliberately NOT gated by hasIsland in renderPlayerContent below.
+		this.partyButton = this.addRenderableWidget(Button.builder(
+						Component.translatable("islandcoreclient.dashboard.party_button"),
+						button -> this.minecraft.setScreen(new PartyScreen(this)))
 				.bounds(startX + (ACTION_BUTTON_WIDTH + ACTION_BUTTON_GAP), row1Y, ACTION_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT)
 				.build());
 		this.biomeButton = this.addRenderableWidget(Button.builder(
@@ -244,8 +249,8 @@ public class DashboardScreen extends BaseMenuScreen {
 		// island yet they stay visible but dimmed rather than disappearing, per design.
 		this.settingsButton.visible = connected;
 		this.settingsButton.active = connected && hasIsland;
-		this.membersButton.visible = connected;
-		this.membersButton.active = connected && hasIsland;
+		this.partyButton.visible = connected;
+		this.partyButton.active = connected;
 		this.biomeButton.visible = connected;
 		this.biomeButton.active = connected && hasIsland;
 		this.limitsButton.visible = connected;
